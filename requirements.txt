@@ -1,0 +1,5 @@
+numpy>=1.24
+matplotlib>=3.7
+opencv-python>=4.8
+casadi>=3.6
+ir-sim>=2.9.3
