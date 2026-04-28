@@ -20,8 +20,9 @@ obstacle:
   - number: 4
     distribution: {name: 'manual'}
     kinematics: {name: 'omni'}
-    vel_max: [0.3, 0.3]
-    vel_min: [-0.3, -0.3]
+    behavior: {name: 'dash'}
+    vel_max: [0.22, 0.22]
+    vel_min: [-0.22, -0.22]
     shape:
       - {name: 'circle', radius: 0.2}
     state:
@@ -29,3 +30,12 @@ obstacle:
       - [3.8, 3.0, 0.0]
       - [3.8, 4.0, 0.0]
       - [3.2, 4.8, 0.0]
+    # Все четыре в одну сторону вдоль ⊥ к (2,2)→(4,9) (n = (-7,2)/√53, d=2.2).
+    goal:
+      - [1.085, 2.804, 0.0]
+      - [1.685, 3.604, 0.0]
+      - [1.685, 4.604, 0.0]
+      - [1.085, 5.404, 0.0]
+    goal_threshold: 0.1
+    plot:
+      show_goal: false

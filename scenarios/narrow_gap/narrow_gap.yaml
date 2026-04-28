@@ -20,10 +20,19 @@ obstacle:
   - number: 2
     distribution: {name: 'manual'}
     kinematics: {name: 'omni'}
-    vel_max: [0.3, 0.3]
-    vel_min: [-0.3, -0.3]
+    # Без behavior в ir-sim omni-препятствия остаются статичными (нулевая скорость).
+    behavior: {name: 'dash'}
+    vel_max: [0.25, 0.25]
+    vel_min: [-0.25, -0.25]
     shape:
       - {name: 'circle', radius: 0.2}
     state:
       - [6.35, 4.5, 0.0]
       - [7.65, 4.5, 0.0]
+    # Все препятствия в одну сторону вдоль ⊥ к (1,1)→(9,9) (start + d·n, один знак; d=2.4).
+    goal:
+      - [4.653, 6.197, 0.0]
+      - [5.953, 6.197, 0.0]
+    goal_threshold: 0.1
+    plot:
+      show_goal: false

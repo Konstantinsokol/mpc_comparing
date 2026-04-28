@@ -1,4 +1,5 @@
 numpy>=1.24
+pillow>=10.0
 matplotlib>=3.7
 opencv-python>=4.8
 casadi>=3.6

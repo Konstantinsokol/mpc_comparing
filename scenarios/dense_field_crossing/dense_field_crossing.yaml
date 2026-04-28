@@ -1,0 +1,50 @@
+world:
+  height: 10
+  width: 10
+  step_time: 0.1
+  sample_time: 0.1
+  offset: [0, 0]
+  collision_mode: 'stop'
+  control_mode: 'auto'
+
+robot:
+  - kinematics: {name: 'diff'}
+    shape: {name: 'circle', radius: 0.2}
+    state: [1.0, 1.0, 0.0]
+    goal: [9.0, 9.0, 0.0]
+    plot:
+      show_trajectory: True
+      show_goal: True
+
+obstacle:
+  - number: 8
+    distribution: {name: 'manual'}
+    kinematics: {name: 'omni'}
+    # Детерминированно: dash через маршрут (1,1)→(9,9); старт/цель симметричны на диагонали,
+    # чередуются стороны (⊥ n=(-1,1)/√2). Смещение от диагонали ~1.15 м (ближе к маршруту, чем 2 м).
+    behavior: {name: 'dash'}
+    vel_max: [0.22, 0.22]
+    vel_min: [-0.22, -0.22]
+    shape:
+      - {name: 'circle', radius: 0.2}
+    state:
+      - [1.307, 2.933, 0.0]
+      - [3.573, 1.947, 0.0]
+      - [2.747, 4.373, 0.0]
+      - [5.173, 3.547, 0.0]
+      - [4.347, 5.973, 0.0]
+      - [6.773, 5.147, 0.0]
+      - [5.947, 7.573, 0.0]
+      - [4.693, 3.067, 0.0]
+    goal:
+      - [2.933, 1.307, 0.0]
+      - [1.947, 3.573, 0.0]
+      - [4.373, 2.747, 0.0]
+      - [3.547, 5.173, 0.0]
+      - [5.973, 4.347, 0.0]
+      - [5.147, 6.773, 0.0]
+      - [7.573, 5.947, 0.0]
+      - [3.067, 4.693, 0.0]
+    goal_threshold: 0.1
+    plot:
+      show_goal: false

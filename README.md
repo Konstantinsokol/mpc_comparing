@@ -1,7 +1,71 @@
-# MPC Module
+# MPC Module (`mpc_comparing`)
 
-Этот каталог содержит несколько MPC-реализаций для unicycle-робота и примеры их
-запуска в `ir-sim`.
+Репозиторий объединяет несколько MPC-реализаций для unicycle-робота и сценарии
+в **ir-sim**: нелинейный MPC на **IPOPT** (стабилизация в точку и слежение) и два
+варианта **линеаризованного QP-MPC** с **OSQP** и **qpOASES** (active set) на
+общих картах, чтобы сравнивать поведение и время решения в одних и тех же
+условиях.
+
+## Структура пакета
+
+### Корень репозитория
+
+| Путь | Назначение |
+|------|------------|
+| `MPC/` | Классы контроллеров (CasADi и численные решатели), без зависимости от `ir-sim`. |
+| `simulation/` | Запуск в симуляторе, общая логика трекинга, визуализация OpenCV. |
+| `scenarios/` | YAML-описания миров для `irsim.make(...)`. |
+| `benchmark_compare.py` | Прогон трёх трекинг-MPC по всем (или одному) сценариям без GUI; графики и `metrics.jsonl`. |
+| `BENCHMARK_README.md` | Подробно: метрики бенчмарка, аргументы CLI, имена выходных файлов. |
+| `requirements.txt`, `setup.py` | Зависимости и установка пакета. |
+
+Скрипты и бенчмарк рассчитаны на то, что **рабочий каталог — корень репозитория**
+(рядом лежат `MPC/` и `simulation/`): в коде в `sys.path` добавляется этот
+корень и выполняются импорты вида `from MPC....`.
+
+### Каталог `MPC/`
+
+- **`unicycle_mpc_ipopt.py`** — класс **`UnicycleMPC`**: нелинейный MPC **подхода к точке** (одна цель `goal`), ограничения на препятствия как нелинейные неравенства по расстоянию, решение через IPOPT.
+- **`unicycle_mpc_ipopt_tracking.py`** — класс **`UnicycleMPC_Tracking`**: нелинейный MPC **слежения** за скользящим окном reference, тоже IPOPT.
+- **`unicycle_mpc_osqp_tracking.py`** — **`UnicycleMPC_OSQP_Tracking`**: линеаризация динамики и препятствий, QP, решатель **OSQP**, поверх решения — **safety filter** на один шаг.
+- **`unicycle_mpc_active_set_tracking.py`** — **`UnicycleMPC_ActiveSet_Tracking`**: та же QP-постановка, что у OSQP, решатель **qpOASES** (active set).
+- **`__init__.py`** — удобный реэкспорт части классов для `from MPC import ...` (см. файл; класс IPOPT-tracking при необходимости импортируйте по полному пути).
+
+### Каталог `simulation/`
+
+**Общие модули** (единая логика для трёх трекинг-скриптов):
+
+- **`mpc_tracking_common.py`** — выбор YAML из аргументов командной строки (`resolve_yaml_path`); препятствия в формате словарей для `solve` (`get_obstacles_from_env`); прямая от старта к цели (`build_straight_path`); локальное окно reference на этой прямой (`generate_reference_trajectory`); общий receding-horizon цикл **`run_tracking_simulation`** с подписями окна и лога через датакласс **`TrackingRunStyle`**; построение стандартных 2×2 графиков **`plot_tracking_results`** (в т.ч. заголовок панели времени решения задаётся параметром).
+- **`mpc_tracking_render.py`** — отрисовка одного кадра в OpenCV: сетка, глобальная прямая, локальный reference, при наличии у MPC поля **`last_corridor_polygons`** — полупрозрачный «коридор» (типично для OSQP), красная траектория, зелёное warm-start предсказание, робот, цель, препятствия и короткий прогноз их движения.
+
+**Тонкие точки входа** (в каждой — в основном блок **`mpc_config`** и **`main()`**):
+
+- **`UnicycleMPC_Tracking.py`** — трекинг на IPOPT.
+- **`UnicycleMPC_Tracking_OSQP.py`** — трекинг на OSQP.
+- **`UnicycleMPC_Tracking_ActiveSet.py`** — трекинг на qpOASES.
+
+Во всех трёх экспортируется **`run_simulation(env, mpc, goal, ..., render=True, verbose=True)`**; бенчмарк вызывает **`render=False`** и **`verbose=False`**, чтобы не открывать окна и не засорять консоль.
+
+**Отдельно от трекинг-цепочки:**
+
+- **`ipopt_mpc.py`** — пример **стабилизации в цель** через **`UnicycleMPC`**: свой цикл симуляции и своя функция отрисовки (не использует `mpc_tracking_common`).
+
+### Сценарии `scenarios/`
+
+Каждый сценарий — подкаталог `scenarios/<имя>/` с файлом `<имя>.yaml`. Имена совпадают с тем, что передаётся в командной строке (например, `head_on` → `scenarios/head_on/head_on.yaml`). Полный список см. в разделе **0.8** ниже.
+
+### Сравнение солверов (бенчмарк)
+
+Запуск из корня:
+
+```bash
+python benchmark_compare.py
+python benchmark_compare.py --scenario free_path --output ./my_results
+```
+
+Фабрики в **`benchmark_compare.py`** дублируют **`mpc_config`** из трёх **`UnicycleMPC_Tracking*.py`** (общие веса и лимиты выровнены); при смене настроек правьте оба места. Детали метрик и выходных файлов — в **[BENCHMARK_README.md](BENCHMARK_README.md)**.
+
+---
 
 ## 0. Запуск На Другом Устройстве
 
@@ -35,13 +99,13 @@
 
 ```bash
 git clone <URL_репозитория>
-cd mpc
+cd mpc_comparing
 ```
 
 Если проект уже скопирован вручную, просто перейди в корень пакета:
 
 ```bash
-cd /path/to/mpc
+cd /path/to/mpc_comparing
 ```
 
 ### 0.3. Создание Виртуального Окружения
@@ -101,10 +165,10 @@ cd ir-sim
 pip install -e .
 ```
 
-После этого вернуться в проект `mpc` и при необходимости ещё раз выполнить:
+После этого вернуться в проект `mpc_comparing` и при необходимости ещё раз выполнить:
 
 ```bash
-cd /path/to/mpc
+cd /path/to/mpc_comparing
 pip install -r requirements.txt
 ```
 
@@ -121,7 +185,7 @@ python -c "import irsim; print('irsim ok')"
 
 ### 0.7. Запуск Сценариев
 
-Запускать скрипты нужно из корня `workspace/mpc`, потому что симуляции делают:
+Запускать скрипты нужно из **корня репозитория** (`mpc_comparing`), потому что симуляции делают:
 
 - `sys.path.insert(...)`
 - импорт вида `from MPC...`
@@ -129,7 +193,7 @@ python -c "import irsim; print('irsim ok')"
 То есть:
 
 ```bash
-cd /path/to/mpc
+cd /path/to/mpc_comparing
 ```
 
 Дальше можно запускать так.
@@ -224,15 +288,10 @@ python simulation/UnicycleMPC_Tracking_ActiveSet.py free_path
 
 Так проще локализовать проблему: среда, solver или конкретный backend.
 
-Основные файлы:
-
-- `MPC/unicycle_mpc_ipopt.py` - нелинейный MPC на IPOPT для движения к точке.
-- `MPC/unicycle_mpc_ipopt_tracking.py` - нелинейный MPC на IPOPT для слежения за траекторией.
-- `MPC/unicycle_mpc_osqp_tracking.py` - QP-MPC с линеаризацией, решатель OSQP.
-- `MPC/unicycle_mpc_active_set_tracking.py` - QP-MPC с линеаризацией, active-set решатель qpOASES.
-- `simulation/UnicycleMPC_Tracking.py` - запуск tracking-варианта на IPOPT.
-- `simulation/UnicycleMPC_Tracking_OSQP.py` - запуск tracking-варианта на OSQP.
-- `simulation/UnicycleMPC_Tracking_ActiveSet.py` - запуск tracking-варианта на active-set.
+Назначение файлов **`MPC/`**, общих модулей **`simulation/mpc_tracking_common.py`**,
+**`simulation/mpc_tracking_render.py`**, тонких скриптов трекинга, **`ipopt_mpc.py`**,
+**`benchmark_compare.py`** и **`BENCHMARK_README.md`** описано в разделе
+**«Структура пакета»** в начале этого README.
 
 ## 1. Состояние и управление
 
@@ -273,13 +332,11 @@ $$
 В коде используется дискретизированная unicycle-модель Эйлера:
 
 $$
-X_{k+1} = X_k + v_k \cos(\theta_k)\, dt
-$$
-$$
-Y_{k+1} = Y_k + v_k \sin(\theta_k)\, dt
-$$
-$$
-\theta_{k+1} = \theta_k + \omega_k\, dt
+\begin{aligned}
+X_{k+1} &= X_k + v_k \cos(\theta_k)\, dt \\
+Y_{k+1} &= Y_k + v_k \sin(\theta_k)\, dt \\
+\theta_{k+1} &= \theta_k + \omega_k\, dt
+\end{aligned}
 $$
 
 Именно эта динамика напрямую зашита в:
@@ -300,10 +357,9 @@ $$
 
 $$
 \mathbf{z} =
-\left[
-x_0, x_1, \dots, x_N,\;
-u_0, u_1, \dots, u_{N-1}
-\right]
+\begin{bmatrix}
+x_0 \\ x_1 \\ \vdots \\ x_N \\ u_0 \\ u_1 \\ \vdots \\ u_{N-1}
+\end{bmatrix}
 $$
 
 ### 3.2. Целевая функция
@@ -365,7 +421,21 @@ $$
 
 3. Ограничения на препятствия.
 
-Для препятствия с центром \((x^{obs}_{i,k}, y^{obs}_{i,k})\) и радиусом \(r_i\):
+Для препятствия с центром
+
+$$
+\begin{bmatrix}
+x^{obs}_{i,k} \\ y^{obs}_{i,k}
+\end{bmatrix}
+$$
+
+и радиусом
+
+$$
+r_i
+$$
+
+выполняется:
 
 $$
 (X_k - x^{obs}_{i,k})^2 + (Y_k - y^{obs}_{i,k})^2
@@ -377,10 +447,10 @@ $$
 постоянной скорости:
 
 $$
-x^{obs}_{i,k} = x^{obs}_{i,0} + v^x_i \, k\, dt
-$$
-$$
-y^{obs}_{i,k} = y^{obs}_{i,0} + v^y_i \, k\, dt
+\begin{aligned}
+x^{obs}_{i,k} &= x^{obs}_{i,0} + v^x_i \, k\, dt \\
+y^{obs}_{i,k} &= y^{obs}_{i,0} + v^y_i \, k\, dt
+\end{aligned}
 $$
 
 Это полноценная нелинейная задача (NLP), решаемая через IPOPT.
@@ -435,18 +505,27 @@ $$
 ### 5.1. Почему это уже не NLP
 
 Чтобы получить QP, нелинейную unicycle-модель приходится линеаризовать около
-опорной траектории \((x_k^{ref}, u_k^{ref})\).
+опорной траектории состояния
+
+$$
+x_k^{ref}
+$$
+
+и опорного управления
+
+$$
+u_k^{ref}
+$$
 
 Сначала из опорной траектории восстанавливается опорное управление:
 
 $$
-v_k^{ref} =
-\frac{\sqrt{(X_{k+1}^{ref}-X_k^{ref})^2 + (Y_{k+1}^{ref}-Y_k^{ref})^2}}{dt}
-$$
-
-$$
-\omega_k^{ref} =
+\begin{aligned}
+v_k^{ref} &=
+\frac{\sqrt{(X_{k+1}^{ref}-X_k^{ref})^2 + (Y_{k+1}^{ref}-Y_k^{ref})^2}}{dt} \\[0.5em]
+\omega_k^{ref} &=
 \frac{\theta_{k+1}^{ref} - \theta_k^{ref}}{dt}
+\end{aligned}
 $$
 
 ### 5.2. Линеаризация динамики
@@ -505,13 +584,13 @@ $$
 После раскрытия скобок это приводится к стандартной QP-форме:
 
 $$
-\min_z \frac{1}{2} z^T H z + g^T z
+\min_z \; \frac{1}{2} z^T H z + g^T z
 $$
 
 при линейных ограничениях
 
 $$
-l \le Az \le u
+l \le A z \le u
 $$
 
 ### 5.4. Линейное приближение obstacle constraints
@@ -545,8 +624,13 @@ $$
 
 В QP-решателях добавлен защитный слой поверх оптимального управления.
 
-Сначала solver предлагает управление \(u_k\). Затем выполняется однокроковый
-прогноз:
+Сначала solver предлагает управление
+
+$$
+u_k
+$$
+
+Затем выполняется однокроковый прогноз:
 
 $$
 \hat{x}_{k+1} = f(x_k, u_k)
@@ -637,7 +721,7 @@ $$
 
 ### Для point stabilization
 
-Файл: `unicycle_mpc_ipopt.py`
+Файл: `MPC/unicycle_mpc_ipopt.py`
 
 На вход подаются:
 
@@ -649,9 +733,9 @@ $$
 
 Файлы:
 
-- `unicycle_mpc_ipopt_tracking.py`
-- `unicycle_mpc_osqp_tracking.py`
-- `unicycle_mpc_active_set_tracking.py`
+- `MPC/unicycle_mpc_ipopt_tracking.py`
+- `MPC/unicycle_mpc_osqp_tracking.py`
+- `MPC/unicycle_mpc_active_set_tracking.py`
 
 На вход подаются:
 
@@ -662,15 +746,32 @@ $$
 То есть для tracking solver решает задачу "следовать за окном reference на
 горизонте", а не "идти просто в одну цель".
 
-## 9. Практический вывод по математике
+## 9. Практический вывод по математике и бенчмарку
 
-- `IPOPT`-решатели решают исходную нелинейную задачу точнее.
-- `OSQP` и `ActiveSet` решают приближённую QP-задачу после линеаризации.
-- В `IPOPT` препятствия задаются точным квадратичным условием расстояния.
-- В `OSQP` и `ActiveSet` препятствия аппроксимируются линейными ограничениями.
-- Поэтому `OSQP` и `ActiveSet` быстрее, но хуже ведут себя в сложной геометрии.
-- Для этого в QP-ветках добавлен safety filter на следующий шаг.
+**Постановка.**
+
+- `IPOPT` решает исходную **нелинейную** задачу (NLP); препятствия — точные нелинейные ограничения по расстоянию.
+- `OSQP` и `ActiveSet` решают **линеаризованную QP** с теми же целевыми весами в коде; препятствия — локальные линейные полуплоскости плюс **safety filter** на один шаг вперёд.
+- QP-ветки обычно **дешевле по времени шага**, но геометрия обхода зависит от качества линеаризации и reference; NLP точнее отражает модель и круговые зоны, но тяжелее и сильнее зависит от локальных минимумов на «симметричных» сценах вроде `head_on`.
+
+**Что показывает `benchmark_compare.py`** (все сценарии из `scenarios/`, которые находит `_discover_scenarios()` — сейчас каждая папка `scenarios/<имя>/` с файлом `<имя>.yaml`; **одинаковые** `horizon`, веса `Q`/`R`, лимиты управления, `safe_distance`, `integration_method=euler` в трёх трекинг-скриптах и в фабриках бенчмарка; подробности в **[BENCHMARK_README.md](BENCHMARK_README.md)** и в **`MPC/explanation.md`**):
+
+| Метод | Среднее время решения | Средний p95 времени | Средний RMSE поперечной ошибки к прямой | Среднее число шагов |
+|--------|------------------------|----------------------|----------------------------------------|----------------------|
+| IPOPT | ~13.8 ms | ~18.5 ms | **~0.098** | ~112 |
+| OSQP | ~9.5 ms | **~12.0 ms** | ~0.146 | ~116 |
+| Active Set | **~9.1 ms** | ~14.4 ms | ~0.146 | ~116 |
+
+На этом прогоне все три метода **успешно** дошли до цели на всех картах (`success` по порогу расстояния). У IPOPT выше **среднее** время шага и заметные **пики** `solve_max_ms` на отдельных сценах (`head_on`, `overtake`); у Active Set среднее время чуть ниже, чем у OSQP, но **хвост** p95/max иногда выше (реже, но длиннее «плохие» шаги). По **CTE RMSE** IPOPT стабильно ближе к прямой reference; две QP-ветки близки друг к другу.
+
+Интерпретация совпадает с большим разбором в **`MPC/explanation.md`**: разница «solver vs solver» часто меньше, чем разница NLP vs линеаризация и качества reference; для тяжёлых динамических разъездов полезен сильнее выраженный nominal path / planner сверху.
 
 Если нужно, следующим шагом можно добавить в этот README ещё и раздел с
-выводом матриц \(A_k, B_k, c_k\) прямо из якобианов CasADi и отдельную схему
-"как из global path строится local reference window".
+выводом матриц
+
+$$
+A_k,\quad B_k,\quad c_k
+$$
+
+прямо из якобианов CasADi и отдельную схему «как из global path строится
+local reference window».
