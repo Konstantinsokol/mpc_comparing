@@ -9,10 +9,24 @@ Decision variables
     where x_k are predicted states, u_k are predicted controls, and s are
     nonnegative slack variables for softened obstacle inequalities.
 
-Cost
-    0.5 z^T H z + g^T z
-    with state-tracking terms, control regularization, terminal cost, and a
-    quadratic penalty on obstacle slacks.
+Cost (same optimum as the expanded MPC functional below)
+    CasADi/OSQP solves:
+        min_z  (1/2) z^T H z + g^T z.
+
+    Expanded form (ignoring additive constants that depend only on r_k):
+        J(z) = sum_{k=0}^{N-1} [ (x_k - r_k)^T Q (x_k - r_k) + u_k^T R u_k ]
+             + (x_N - r_N)^T Q_N (x_N - r_N)
+             + rho_s * ||s||_2^2
+             - w_prog * sum_{k=0}^{N-1} v_k,
+
+    where z = [x_0, ..., x_N, u_0, ..., u_{N-1}, s]^T,
+          x_k = [p_k^x, p_k^y, theta_k]^T,  u_k = [v_k, omega_k]^T,
+          Q = diag(q_pos, q_pos, q_theta),  R = diag(r, r_yaw),  Q_N = 5 Q,
+          rho_s = slack_weight,  w_prog = progress_weight,
+          s in R^{n_slack}_+ stacks one nonnegative slack per active obstacle
+          row on steps k = 0..obs_horizon-1 (see obstacle constraints).
+
+    Heading enters linearly as (theta_k - r_k^theta)^2 (no angle wrap in QP).
 
 Constraints
     - initial-state equality,
@@ -39,12 +53,15 @@ class UnicycleMPC_OSQP_Tracking:
         z = [x_0, ..., x_N, u_0, ..., u_{N-1}, s]^T
         x_k in R^3, u_k in R^2, s >= 0.
 
-    Cost
-        - stage tracking (x_k-r_k)^T Q (x_k-r_k),
-        - control regularization u_k^T R u_k,
-        - terminal tracking with Q_N,
-        - obstacle-slack penalty rho_s ||s||^2,
-        - small linear forward bias on v_k.
+    Cost (full functional)
+        With x_k in R^3, u_k = [v_k, omega_k], reference r_k, slack vector s:
+
+            J = sum_{k=0}^{N-1} [ (x_k-r_k)^T Q (x_k-r_k) + u_k^T R u_k ]
+                + (x_N-r_N)^T Q_N (x_N-r_N)
+                + slack_weight * ||s||^2
+                - progress_weight * sum_k v_k.
+
+        Implemented as min_z (1/2) z^T H z + g^T z (see _build_qp).
 
     Constraints
         - x_0 equals the measured state,
@@ -469,12 +486,17 @@ class UnicycleMPC_OSQP_Tracking:
         u_ref = self._reference_inputs(traj_guess)
 
         # ---------------- COST ----------------
-        # State tracking:
-        #   sum_k (x_k - r_k)^T Q (x_k - r_k)
-        # Control effort:
-        #   sum_k u_k^T R u_k
-        # plus a small linear reward on v_k to avoid the trivial "stop
-        # forever" solution when a safe forward motion still exists.
+        #
+        # Assembled so that (1/2) z^T H z + g^T z equals (up to constants in r_k):
+        #
+        #   sum_{k=0}^{N-1} [ (x_k - ref[k])^T Q (x_k - ref[k]) + u_k^T R u_k ]
+        #   + (x_N - ref[N])^T Q_term (x_N - ref[N])
+        #   + slack_weight * sum_i s_i^2
+        #   - progress_weight * sum_{k=0}^{N-1} v_k,
+        #
+        # with z = [x_0..x_N, u_0..u_{N-1}, s], s_i >= 0.
+        # Blocks: H_xx += 2Q, H_uu += 2R, g_x += -2 Q ref[k], g_v += -progress_weight,
+        # H_slack,ii += 2 * slack_weight.
 
         for k in range(self.N):
             xs = self._state_slice(k)

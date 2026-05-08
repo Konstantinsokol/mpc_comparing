@@ -8,9 +8,24 @@ Decision variables
     z = [X_0, ..., X_N, U_0, ..., U_{N-1}]^T
     where X_k are explicit state variables and U_k are control variables.
 
-Cost
-    Nonlinear tracking cost with wrapped heading error, control regularization,
-    and a terminal penalty.
+Cost (objective J to minimize)
+    Decision vector:
+        Z = [vec(X), vec(U)] with X = [x_0, ..., x_N], x_k in R^3,
+        U = [u_0, ..., u_{N-1}], u_k = [v_k, omega_k]^T.
+
+    Reference r_k = [r_k^x, r_k^y, r_k^theta]^T for k = 0..N.
+
+    Wrapped heading error:
+        e_k^theta = atan2( sin(theta_k - r_k^theta), cos(theta_k - r_k^theta) ),
+        e_k = [ x_k - r_k^x, y_k - r_k^y, e_k^theta ]^T.
+
+    Functional:
+        J(Z) = sum_{k=0}^{N-1} [ e_k^T Q e_k + u_k^T R u_k ]
+             + e_N^T Q_N e_N.
+
+    With defaults Q = diag(q_pos, q_pos, q_theta), R = diag(r, r_yaw),
+    Q_N = 5 Q. No slack term and no linear "progress" on v (unlike the QP
+    controllers).
 
 Constraints
     - initial-state equality,
@@ -35,6 +50,10 @@ class UnicycleMPC_Tracking:
     Decision variables:
         X = [x_0, ..., x_N]    predicted states
         U = [u_0, ..., u_{N-1}] predicted controls
+
+    Objective J(X,U): same weighted tracking + control structure as in the
+    module docstring — sum_k [ e_k^T Q e_k + u_k^T R u_k ] + e_N^T Q_N e_N with
+    wrapped heading error e_k^theta; no progress term on v and no slack penalty.
 
     The resulting NLP is solved with IPOPT using a primal-dual interior-point
     method with filter line search.
@@ -205,13 +224,20 @@ class UnicycleMPC_Tracking:
         obs_active = ca.SX.sym('obs_active', n_obs)
         
         # ---------- OBJECTIVE ----------
-        # We penalize state tracking and control effort:
         #
-        #   sum_k (x_k-r_k)^T Q (x_k-r_k) + u_k^T R u_k
-        #   + (x_N-r_N)^T Q_N (x_N-r_N)
+        # Minimize J(Z) with Z = [vec(X), vec(U)], reference ref_traj[:, k] = r_k:
         #
-        # The heading error is wrapped with atan2(sin, cos) so that angles near
-        # +/- pi do not create an artificial large error.
+        #   J = sum_{k=0}^{N-1} [ e_k^T Q e_k + u_k^T R u_k ]
+        #       + e_N^T Q_N e_N,
+        #
+        #   e_k = [ X[0,k]-r_k^x, X[1,k]-r_k^y, e_k^theta ]^T,
+        #   e_k^theta = atan2( sin(X[2,k]-r_k^theta), cos(X[2,k]-r_k^theta) ),
+        #   u_k = U[:,k],  Q_N = Q_term.
+        #
+        # Expanded equivalent (diagonal Q = diag(q_pos, q_pos, q_theta)):
+        #   e_k^T Q e_k = q_pos (x-r^x)^2 + q_pos (y-r^y)^2 + q_theta (e_k^theta)^2,
+        #   u_k^T R u_k = r v_k^2 + r_yaw omega_k^2.
+        #
         cost = 0
         for k in range(N):
             theta_err = ca.atan2(

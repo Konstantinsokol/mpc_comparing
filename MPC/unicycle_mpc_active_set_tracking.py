@@ -7,9 +7,18 @@ Problem formulation
 Decision variables
     z = [x_0, ..., x_N, u_0, ..., u_{N-1}, s]^T.
 
-Cost
-    Quadratic state-tracking, control regularization, terminal penalty, and
-    slack penalization for softened obstacle constraints.
+Cost (identical structure to OSQP; qpOASES minimizes the same functional)
+    Expanded MPC objective:
+        J(z) = sum_{k=0}^{N-1} [ (x_k - r_k)^T Q (x_k - r_k) + u_k^T R u_k ]
+             + (x_N - r_N)^T Q_N (x_N - r_N)
+             + rho_s * ||s||_2^2
+             - w_prog * sum_{k=0}^{N-1} v_k,
+
+    with z = [x_0, ..., x_N, u_0, ..., u_{N-1}, s]^T, Q_N = 5 Q,
+    rho_s = slack_weight, w_prog = progress_weight.
+
+    Solver form: min_z (1/2) z^T H z + g^T z with the same H, g pattern as
+    unicycle_mpc_osqp_tracking._build_qp.
 
 Constraints
     - initial-state equality,
@@ -37,9 +46,13 @@ class UnicycleMPC_ActiveSet_Tracking:
         z = [x_0, ..., x_N, u_0, ..., u_{N-1}, s]^T
         with the same state/control/slack partition as in the OSQP solver.
 
-    Cost
-        State tracking, control effort, terminal cost, and quadratic slack
-        penalty. A small forward bias on v_k is kept to discourage stalling.
+    Cost (full functional; matches OSQP branch)
+        J = sum_{k=0}^{N-1} [ (x_k-r_k)^T Q (x_k-r_k) + u_k^T R u_k ]
+            + (x_N-r_N)^T Q_N (x_N-r_N)
+            + slack_weight * ||s||^2
+            - progress_weight * sum_k v_k.
+
+        Transcription: min_z (1/2) z^T H z + g^T z (see _build_qp_matrices).
 
     Constraints
         Initial-state equality, affine linearized dynamics, input box bounds,
@@ -375,9 +388,14 @@ class UnicycleMPC_ActiveSet_Tracking:
         u_ref = self._reference_inputs(traj_guess)
         obs_list = self._select_obstacles(state, obstacles)
 
-        # Stage cost:
-        #   (x_k-r_k)^T Q (x_k-r_k) + u_k^T R u_k
-        # plus a small forward reward on v_k.
+        # Stage + terminal + slack cost: objective J assembled so that
+        # (1/2) z^T H z + g^T z equals (up to constants in ref):
+        #
+        #   sum_{k=0}^{N-1} [ (x_k-ref[k])^T Q (x_k-ref[k]) + u_k^T R u_k ]
+        #   + (x_N-ref[N])^T Q_term (x_N-ref[N])
+        #   + slack_weight * sum_i s_i^2
+        #   - progress_weight * sum_{k=0}^{N-1} v_k.
+        #
         for k in range(self.N):
             x_slice = self._state_slice(k)
             u_slice = self._control_slice(k)
