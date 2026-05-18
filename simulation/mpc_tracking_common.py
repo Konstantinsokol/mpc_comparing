@@ -172,6 +172,20 @@ def get_obstacles_from_env(env: Any) -> List[Dict[str, Any]]:
     return obstacles
 
 
+def copy_obstacle_snapshot_from_env(env: Any) -> List[Dict[str, Any]]:
+    """Глубокая копия снимка препятствий для логов визуализации (бенчмарк, GIF)."""
+    snap: List[Dict[str, Any]] = []
+    for o in get_obstacles_from_env(env):
+        snap.append(
+            {
+                "position": np.array(o["position"], dtype=float).copy(),
+                "velocity": np.array(o["velocity"], dtype=float).copy(),
+                "radius": float(o["radius"]),
+            }
+        )
+    return snap
+
+
 def build_straight_path(start: np.ndarray, goal: np.ndarray, step_size: float) -> np.ndarray:
     """Прямой глобальный путь от старта к цели (x, y, theta)."""
     path_start = np.array(start, dtype=float).copy()
@@ -273,6 +287,8 @@ def run_tracking_simulation(
     path_line = build_straight_path(state.copy(), goal, step_size=max(mpc.dt * mpc.v_max, 0.15))
     last_idx = 0
 
+    obstacle_history: List[List[Dict[str, Any]]] = [copy_obstacle_snapshot_from_env(env)]
+
     for step in range(max_steps):
         obstacles = get_obstacles_from_env(env)
         ref_traj, last_idx = generate_reference_trajectory(path_line, state, mpc.N, last_idx, obstacles)
@@ -287,6 +303,8 @@ def run_tracking_simulation(
 
         dist = float(np.linalg.norm(state[:2] - goal[:2]))
         distances.append(dist)
+
+        obstacle_history.append(copy_obstacle_snapshot_from_env(env))
 
         if render or gif_path:
             img = render_tracking_frame(
@@ -340,6 +358,7 @@ def run_tracking_simulation(
         "avg_time": float(np.mean(solve_times)) if solve_times else 0.0,
         "final_dist": distances[-1] if distances else float(np.inf),
         "gif_path": saved_gif,
+        "obstacle_history": obstacle_history,
     }
 
 

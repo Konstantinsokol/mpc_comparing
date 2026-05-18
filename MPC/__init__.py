@@ -7,7 +7,7 @@
 """
 
 from .unicycle_mpc_active_set_tracking import UnicycleMPC_ActiveSet_Tracking
-from .unicycle_mpc_ipopt import UnicycleMPC
+from .unicycle_mpc_ipopt_tracking import UnicycleMPC_Tracking
 from .unicycle_mpc_osqp_tracking import UnicycleMPC_OSQP_Tracking
 
 __all__ = [

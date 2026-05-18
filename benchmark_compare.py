@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Circle
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path:
@@ -335,6 +336,92 @@ def parse_integrators_arg(s: str) -> List[str]:
     return out if out else ["euler"]
 
 
+def _longest_obstacle_history(
+    results: Dict[str, Dict[str, Any]], run_order: List[str]
+) -> Tuple[Optional[List[List[Dict[str, Any]]]], Optional[str]]:
+    """Берём историю препятствий из самого длинного эпизода (разное число шагов у солверов)."""
+    best_hist: Optional[List[List[Dict[str, Any]]]] = None
+    best_len = -1
+    best_label: Optional[str] = None
+    for name in run_order:
+        r = results[name]
+        oh = r.get("obstacle_history")
+        if not oh:
+            continue
+        ln = len(oh)
+        if ln > best_len:
+            best_len = ln
+            best_hist = oh
+            best_label = name
+    return best_hist, best_label
+
+
+def _plot_obstacle_overlays(
+    ax_xy: plt.Axes,
+    obs_hist: Optional[List[List[Dict[str, Any]]]],
+    cmap_name: str = "tab10",
+) -> None:
+    """Траектории центров кругов, стартовые диски и стрелки направления скорости (фиксированная длина)."""
+    if not obs_hist or len(obs_hist[0]) == 0:
+        return
+
+    cmap = plt.get_cmap(cmap_name)
+    n_obs = len(obs_hist[0])
+    arrow_len = 0.38
+
+    for j in range(n_obs):
+        c = cmap(j % cmap.N)
+        xs: List[float] = []
+        ys: List[float] = []
+        vxs: List[float] = []
+        vys: List[float] = []
+        for snap in obs_hist:
+            if j >= len(snap):
+                continue
+            o = snap[j]
+            px, py = float(o["position"][0]), float(o["position"][1])
+            vx, vy = float(o["velocity"][0]), float(o["velocity"][1])
+            xs.append(px)
+            ys.append(py)
+            vxs.append(vx)
+            vys.append(vy)
+        if len(xs) < 2:
+            continue
+
+        o0 = obs_hist[0][j]
+        circ = Circle(
+            (float(o0["position"][0]), float(o0["position"][1])),
+            float(o0["radius"]),
+            facecolor=c,
+            edgecolor=c,
+            linewidth=1.2,
+            alpha=0.22,
+            zorder=2,
+        )
+        ax_xy.add_patch(circ)
+
+        ax_xy.plot(xs, ys, "-", color=c, lw=1.75, alpha=0.88, zorder=3)
+
+        T = len(xs)
+        n_arrows = min(16, max(2, T // 8))
+        idxs = np.linspace(0, T - 1, num=n_arrows, dtype=int)
+        for ii in idxs:
+            vx, vy = vxs[ii], vys[ii]
+            spd = float(np.hypot(vx, vy))
+            if spd < 1e-5:
+                continue
+            dx = vx / spd * arrow_len
+            dy = vy / spd * arrow_len
+            ax_xy.annotate(
+                "",
+                xy=(xs[ii] + dx, ys[ii] + dy),
+                xytext=(xs[ii], ys[ii]),
+                arrowprops=dict(arrowstyle="-|>", color=c, lw=1.15, alpha=0.95, shrinkA=0, shrinkB=0),
+                zorder=4,
+            )
+
+        ax_xy.plot([], [], "-", color="#666666", lw=1.75, alpha=0.88, label="Препятствия")
+
 def plot_scenario_dashboard(
     scenario_name: str,
     results: Dict[str, Dict[str, Any]],
@@ -356,23 +443,39 @@ def plot_scenario_dashboard(
 
     # 1) XY траектории
     ax_xy = fig.add_subplot(gs[0, :2])
+    ref = next(iter(results.values())).get("reference_path")
+    if ref is not None:
+        ax_xy.plot(
+            ref[:, 0],
+            ref[:, 1],
+            "k--",
+            lw=1,
+            alpha=0.5,
+            label="Прямой reference",
+            zorder=1,
+        )
+
+    obs_hist, _obs_ref_lbl = _longest_obstacle_history(results, run_order)
+    _plot_obstacle_overlays(ax_xy, obs_hist)
+
     for name in run_order:
         r = results[name]
         tr = r["trajectory"]
         c = pal.get(name, "gray")
-        ax_xy.plot(tr[:, 0], tr[:, 1], "-", color=c, lw=2, label=name, alpha=0.9)
-        ax_xy.scatter(tr[0, 0], tr[0, 1], c=c, s=40, zorder=5)
-    ref = next(iter(results.values())).get("reference_path")
-    if ref is not None:
-        ax_xy.plot(ref[:, 0], ref[:, 1], "k--", lw=1, alpha=0.5, label="Прямой reference")
-    ax_xy.scatter([goal[0]], [goal[1]], c="red", s=120, marker="*", zorder=6, label="Цель")
-    ax_xy.set_title(f"Траектории: {scenario_name}")
+        ax_xy.plot(tr[:, 0], tr[:, 1], "-", color=c, lw=2, label=name, alpha=0.9, zorder=5)
+        ax_xy.scatter(tr[0, 0], tr[0, 1], c=c, s=40, zorder=6)
+    ax_xy.scatter([goal[0]], [goal[1]], c="red", s=120, marker="*", zorder=7, label="Цель")
+    ax_xy.set_title(f"Траектории: {scenario_name}", fontsize=11)
     ax_xy.set_xlabel("X")
     ax_xy.set_ylabel("Y")
     ax_xy.axis("equal")
     ax_xy.grid(True, alpha=0.3)
-    ax_xy.legend(loc="best", fontsize=8)
-
+    ax_xy.legend(
+        loc="upper right",
+        fontsize=7,
+        framealpha=0.93,
+        fancybox=False,
+    )
     # 2) Таблица скаляров
     ax_tbl = fig.add_subplot(gs[0, 2])
     ax_tbl.axis("off")
